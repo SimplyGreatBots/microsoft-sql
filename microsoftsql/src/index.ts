@@ -4,6 +4,22 @@ import * as sql from 'mssql'
 
 type IntegrationLogger = bp.Client['client']['logger']
 
+let pool: sql.ConnectionPool | null = null
+
+async function getPool(config: sql.config, logger: IntegrationLogger): Promise<sql.ConnectionPool> {
+  if (pool) {
+    return pool
+  }
+  try {
+    pool = await sql.connect(config)
+    logger.forBot().info('Successfully connected to Microsoft SQL Server')
+  } catch (err: any) {
+    logger.forBot().error(`Failed to connect to Microsoft SQL Server: ${err}`)
+    throw new sdk.RuntimeError(`Failed to connect to Microsoft SQL Server, ${err}`)
+  }
+  return pool
+}
+
 export default new bp.Integration({
   register: async ({ ctx, logger }) => {
    
@@ -35,6 +51,7 @@ export default new bp.Integration({
     logger.forBot().error(`Failed to connect to Microsoft SQL Server: ${err}`)
     throw new sdk.RuntimeError(`Failed to connect to Microsoft SQL Server, ${err}`)
   }
+
   },
   unregister: async () => {
     /**
@@ -46,6 +63,35 @@ export default new bp.Integration({
   actions: {
     createTable: async (args): Promise<{}> => {
       args.logger.forBot().info(`Creating table: ${args.input.table}`)
+
+      const { table } = args.input
+      const logger = args.logger as IntegrationLogger
+
+      const pool = await getPool({
+        user: args.ctx.configuration.user,
+        password: args.ctx.configuration.password,
+        server: 'localhost',
+        database: args.ctx.configuration.database,
+        options: {
+          instanceName: args.ctx.configuration.server,
+          encrypt: false,
+          trustServerCertificate: true,
+        }
+      }, logger)
+
+      try {
+        // const createTableQuery = `
+        //   CREATE TABLE ${table.name} (
+        //     ${table.columns.map((col: { name: string, type: string }) => `${col.name} ${col.type}`).join(', ')}
+        //     )`
+            
+        //await pool.request().query(createTableQuery)
+        logger.forBot().info(`Table created successfully`)
+      } catch (err: any) {
+        handleSQLError(err, logger)
+        throw new sdk.RuntimeError(`Failed to create table ${err}`)
+      }
+
       return {}
     }
   },

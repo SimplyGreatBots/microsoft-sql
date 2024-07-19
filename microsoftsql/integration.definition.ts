@@ -22,8 +22,8 @@ export default new IntegrationDefinition({
       title: 'Create Table',
       input: {
         schema: z.object({
-          table: z.string().describe('JSON object representing the table to create.'),
-        })
+          table: z.string().describe('Stringified JSON object representing the table to create.'),
+        }),
       },
       output: {
         schema: z.object({
