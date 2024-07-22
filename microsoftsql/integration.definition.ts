@@ -13,7 +13,7 @@ export default new IntegrationDefinition({
     schema: z.object({
       user: z.string().optional().describe('The user name to connect to the database.'),
       password: z.string().optional().describe('The password for the user.'),
-      server: z.string().describe('The server to connect to. Can be an IP address or a domain name.'),
+      instanceName: z.string().describe('The server to connect to. Can be an IP address or a domain name.'),
       database: z.string().describe('Name of the database to connect to.'),
     }),
   },
