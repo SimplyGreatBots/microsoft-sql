@@ -5,6 +5,8 @@ import * as sql from 'mssql'
 type IntegrationLogger = bp.Client['client']['logger']
 type IntegrationCtx = bp.Client['client']['ctx']
 
+type queryDataOutput = bp.actions.queryData.output.Output
+
 let sqlPool: sql.ConnectionPool | null = null;
 
 export default new bp.Integration({
@@ -22,29 +24,25 @@ export default new bp.Integration({
   },
   actions: {
     createTable: async (args): Promise<{}> => {
-        args.logger.forBot().info(`Received request to create table with data: ${args.input.table}`)
+        // Extract tableName and schema from args.input
+        const { tableName, data } = args.input;
 
-        // Parse the input JSON to get table schema
-        let tableSchema;
+        let tableData;
         try {
-        tableSchema = JSON.parse(args.input.table);
+            tableData = JSON.parse(data);
         } catch (error) {
-        args.logger.forBot().error(`Error. Table is not formatted correctly. Must be a stringified JSON`)
-        throw new sdk.RuntimeError('Error. Table is not formatted correctly. Must be a stringified JSON')
+            args.logger.forBot().error(`Error parsing JSON schema: ${error}`);
+            throw new sdk.RuntimeError('Error. Schema is not formatted correctly. Must be a stringified JSON');
         }
 
-        const { tableName, columns } = tableSchema;
-
-        args.logger.forBot().info(`Creating table ${tableName} with columns: ${columns}`)
-
         // Construct the SQL statement to create a table
-        let createTableSQL = `CREATE TABLE ${tableName} (`
-        const columnDefinitions = columns.map((column: any) => {
-            return `${column.name} ${column.type}${column.size ? `(${column.size})` : ''} ${column.required ? 'NOT NULL' : 'NULL'}`
+        let createTableSQL = `CREATE TABLE ${tableName} (`;
+        const columnDefinitions = tableData.columns.map((column: any) => {
+            return `${column.name} ${column.type}${column.size ? `(${column.size})` : ''} ${column.required ? 'NOT NULL' : 'NULL'}`;
         });
-        createTableSQL += columnDefinitions.join(', ') + ');'
+        createTableSQL += columnDefinitions.join(', ') + ');';
 
-        args.logger.forBot().info(`Constructed SQL: ${createTableSQL}`)
+        args.logger.forBot().info(`Constructed SQL: ${createTableSQL}`);
 
         // Connect to the database and execute the SQL statement
         try {
@@ -53,11 +51,86 @@ export default new bp.Integration({
             args.logger.forBot().info(`Table ${tableName} created successfully.`);
         } catch (error: any) {
             args.logger.forBot().error(`Error creating table: ${error}`);
-            throw new Error(`Failed to create table ${tableName}: ${error.message}`);
+            throw new sdk.RuntimeError(`Failed to create table ${tableName}: ${error.message}`);
         }
 
         return {};
-    }
+    },
+    dropTable: async (args): Promise<{}> => {
+        args.logger.forBot().info(`Received request to drop table: ${args.input.tableName}`)
+        const tableName = args.input.tableName;
+        const dropTableSQL = `DROP TABLE IF EXISTS ${tableName};`;
+
+        try {
+            const pool = await getOrCreatePool(args.ctx, args.logger)
+            await pool.request().query(dropTableSQL)
+            args.logger.forBot().info(`Table ${tableName} dropped successfully.`)
+        } catch (error: any) {
+            args.logger.forBot().error(`Error dropping table ${tableName}: ${error}`)
+            throw new sdk.RuntimeError(`Failed to drop table ${tableName}: ${error.message}`)
+        }
+        return {}
+    },
+    insertData: async (args): Promise<{}> => {
+        // Parse the input JSON to get table data
+        let rowData;
+        try {
+            rowData = JSON.parse(args.input.data);  // rowData is expected to be an array
+        } catch (error) {
+            args.logger.forBot().error(`Error parsing JSON input for data: ${error}`)
+            throw new sdk.RuntimeError('Invalid JSON format for table data.')
+        }
+
+        if (!Array.isArray(rowData) || rowData.length === 0) {
+            throw new sdk.RuntimeError('Data must be a non-empty array of objects.')
+        }
+
+        const tableName = args.input.tableName;
+        const keys = Object.keys(rowData[0])
+
+        // Constructing the VALUES part of the SQL query for each row
+        const values = rowData.map(row => {
+            const rowValues = keys.map(key => {
+                const value = row[key]
+                if (typeof value === 'string') {
+                    return `'${value.replace(/'/g, "''")}'`
+                }
+                return `'${value}'`
+            });
+            return `(${rowValues.join(', ')})`
+        }).join(', ');
+
+        // Construct the SQL statement to insert data
+        let insertDataSQL = `INSERT INTO ${tableName} (${keys.join(', ')}) VALUES ${values};`
+
+        try {
+            const pool = await getOrCreatePool(args.ctx, args.logger)
+            await pool.request().query(insertDataSQL)
+            args.logger.forBot().info(`Data inserted into ${tableName} successfully.`)
+        } catch (error: any) {
+            args.logger.forBot().error(`Error inserting data into ${tableName}: ${error}`)
+            throw new sdk.RuntimeError(`Failed to insert data into ${tableName}: ${error.message}`)
+        }
+
+        return {}
+    },
+    queryData: async (args): Promise<queryDataOutput> => {
+        const query  = args.input.query
+        // Get or create a pool connection
+        try {
+          const pool = await getOrCreatePool(args.ctx, args.logger)
+          const result = await pool.request().query(query)
+          args.logger.forBot().info(`Query executed successfully.`)
+    
+          // Prepare the data to be returned
+          return {
+            data: result.recordset 
+          }
+        } catch (error: any) {
+          args.logger.forBot().error(`Error executing query: ${error}`)
+          throw new sdk.RuntimeError(`Error executing query: ${error}`)
+        }
+    },
   },
   channels: {},
   handler: async () => {},

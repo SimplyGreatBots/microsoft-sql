@@ -1,5 +1,6 @@
 import { IntegrationDefinition, z } from '@botpress/sdk'
 import { integrationName } from './package.json'
+import { query } from 'mssql'
 
 export default new IntegrationDefinition({
   name: integrationName,
@@ -23,7 +24,8 @@ export default new IntegrationDefinition({
       title: 'Create Table',
       input: {
         schema: z.object({
-          table: z.string().describe('Stringified JSON object representing the table to create.'),
+          tableName: z.string().describe('Name of the table to create.'),
+          data: z.string().describe('Stringified JSON array representing the table to create.'),
         }),
       },
       output: {
@@ -31,6 +33,43 @@ export default new IntegrationDefinition({
         })
       },
       description: 'Create a table in the database.',
+    },
+    dropTable: {
+      title: 'Drop Table',
+      input: {
+        schema: z.object({
+          tableName: z.string().describe('Name of the table to drop.'),
+        }),
+      },
+      output:{
+        schema: z.object({})
+      },
+      description: 'Drop a table from the database.'
+    },
+     insertData: {
+      title: 'Insert Data',
+      input: {
+        schema: z.object({
+          tableName: z.string().describe('Name of the table to insert data into.'),
+          data: z.string().describe('Stringified JSON array representing the data to insert.'),
+        }),
+      },
+      output: {
+        schema: z.object({})
+      },  
+    },
+    queryData: {
+      title: 'Query Data',
+      input: {
+        schema: z.object({
+          query: z.string().describe('SQL query to execute.'),
+        }),
+      },
+      output: {
+        schema: z.object({
+          data: z.array(z.any()).describe('Array of objects representing the data returned by the query.'),
+        })
+      },
     }
   }
 })
