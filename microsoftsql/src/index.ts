@@ -3,35 +3,15 @@ import * as bp from '.botpress'
 import * as sql from 'mssql'
 
 type IntegrationLogger = bp.Client['client']['logger']
+type IntegrationCtx = bp.Client['client']['ctx']
+
+let sqlPool: sql.ConnectionPool | null = null;
 
 export default new bp.Integration({
   register: async ({ ctx, logger }) => {
    
-  const user = ctx.configuration.user
-  const password = ctx.configuration.password
-  const server = 'localhost'
-  const instanceName = ctx.configuration.instanceName
-  const database = ctx.configuration.database
-
-  const config = {
-    user: user,
-    password: password,
-    server: server,
-    database: database,
-    pool:{
-        idleTimeoutMillis: 30000
-    },
-    options: {
-        instanceName: instanceName,
-        encrypt: false,
-        trustServerCertificate: true,
-    }
-  }
-  
   try {
-    const pool = await sql.connect(config)
-    logger.forBot().info('Successfully connected to Microsoft SQL Server')
-
+     sqlPool = await getOrCreatePool(ctx, logger)
   } catch (err: any) {
     logger.forBot().error(`Failed to connect to Microsoft SQL Server: ${err}`)
     throw new sdk.RuntimeError(`Failed to connect to Microsoft SQL Server, ${err}`)
@@ -39,143 +19,82 @@ export default new bp.Integration({
 
   },
   unregister: async () => {
-    /**
-     * This is called when a bot removes the integration.
-     * You should use this handler to instanciate ressources in the external service and ensure that the configuration is valid.
-     */
-    throw new sdk.RuntimeError('Invalid configuration') // replace this with your own validation logic
   },
   actions: {
     createTable: async (args): Promise<{}> => {
-      args.logger.forBot().info(`Creating table: ${args.input.table}`)
-      return {}
+        args.logger.forBot().info(`Received request to create table with data: ${args.input.table}`)
+
+        // Parse the input JSON to get table schema
+        let tableSchema;
+        try {
+        tableSchema = JSON.parse(args.input.table);
+        } catch (error) {
+        args.logger.forBot().error(`Error. Table is not formatted correctly. Must be a stringified JSON`)
+        throw new sdk.RuntimeError('Error. Table is not formatted correctly. Must be a stringified JSON')
+        }
+
+        const { tableName, columns } = tableSchema;
+
+        args.logger.forBot().info(`Creating table ${tableName} with columns: ${columns}`)
+
+        // Construct the SQL statement to create a table
+        let createTableSQL = `CREATE TABLE ${tableName} (`
+        const columnDefinitions = columns.map((column: any) => {
+            return `${column.name} ${column.type}${column.size ? `(${column.size})` : ''} ${column.required ? 'NOT NULL' : 'NULL'}`
+        });
+        createTableSQL += columnDefinitions.join(', ') + ');'
+
+        args.logger.forBot().info(`Constructed SQL: ${createTableSQL}`)
+
+        // Connect to the database and execute the SQL statement
+        try {
+            const pool = await getOrCreatePool(args.ctx, args.logger);
+            const dbResponse = await pool.request().query(createTableSQL);
+            args.logger.forBot().info(`Table ${tableName} created successfully.`);
+        } catch (error: any) {
+            args.logger.forBot().error(`Error creating table: ${error}`);
+            throw new Error(`Failed to create table ${tableName}: ${error.message}`);
+        }
+
+        return {};
     }
   },
   channels: {},
   handler: async () => {},
 })
 
-function handleSQLError(err: any, logger: IntegrationLogger) {
-  if (err instanceof sql.ConnectionError) {
-      handleConnectionError(err, logger)
-  } else if (err instanceof sql.TransactionError) {
-      handleTransactionError(err, logger)
-  } else if (err instanceof sql.RequestError) {
-      handleRequestError(err, logger)
-  } else if (err instanceof sql.PreparedStatementError) {
-      handlePreparedStatementError(err, logger)
-  } else {
-      logger.forBot().error(`Unknown SQL error: ${err.message}`)
-  }
+async function getOrCreatePool(ctx: IntegrationCtx, logger: IntegrationLogger) {
+    if (!sqlPool) {
+      const user = ctx.configuration.user
+      const password = ctx.configuration.password
+      const instanceName = ctx.configuration.instanceName
+      const database = ctx.configuration.database
+      const port = ctx.configuration.port
 
-  if (err.originalError) {
-      logger.forBot().error(`Original error: ${err.originalError.message}`)
-  }
+      const config = {
+        user: user,
+        password: password,
+        server: instanceName,
+        database: database,
+        pool: {
+          idleTimeoutMillis: 30000
+        },
+        options: {  
+          port: port,
+          encrypt: false,
+          trustServerCertificate: true,
+        }
+      }
 
-  if (err.precedingErrors) {
-      err.precedingErrors.forEach((precedingError :any , index: any) => {
-          logger.forBot().error(`Preceding error ${index + 1}: ${precedingError.message}`)
-      })
+      try {
+        sqlPool = new sql.ConnectionPool(config)
+        await sqlPool.connect()
+        logger.forBot().info('Successfully connected and created a new SQL Server connection pool.')
+      } catch (err) {
+        logger.forBot().error(`Failed to create a new SQL connection pool: ${err}`)
+        throw new sdk.RuntimeError(`Failed to create a new SQL connection pool, ${err}`)
+      }
+    }
+    return sqlPool;
   }
-}
-
-function handleConnectionError(err: any, logger: IntegrationLogger) {
-  switch (err.code) {
-      case 'ELOGIN':
-          logger.forBot().error('Login failed for user.')
-          break
-      case 'ETIMEOUT':
-          logger.forBot().error('Connection timeout.')
-          break
-      case 'EDRIVER':
-          logger.forBot().error('Unknown driver.')
-          break
-      case 'EALREADYCONNECTED':
-          logger.forBot().error('Database is already connected!')
-          break
-      case 'EALREADYCONNECTING':
-          logger.forBot().error('Already connecting to database!')
-          break
-      case 'ENOTOPEN':
-          logger.forBot().error('Connection not yet open.')
-          break
-      case 'EINSTLOOKUP':
-          logger.forBot().error('Instance lookup failed.')
-          break
-      case 'ESOCKET':
-          logger.forBot().error('Socket error.')
-          break
-      case 'ECONNCLOSED':
-          logger.forBot().error('Connection is closed.')
-          break
-      default:
-          logger.forBot().error(`Connection error: ${err.message}`)
-  }
-}
-
-function handleTransactionError(err: any, logger: IntegrationLogger) {
-  switch (err.code) {
-      case 'ENOTBEGUN':
-          logger.forBot().error('Transaction has not begun.')
-          break
-      case 'EALREADYBEGUN':
-          logger.forBot().error('Transaction has already begun.')
-          break
-      case 'EREQINPROG':
-          logger.forBot().error("Can't commit/rollback transaction. There is a request in progress.")
-          break
-      case 'EABORT':
-          logger.forBot().error('Transaction has been aborted.')
-          break
-      default:
-          logger.forBot().error(`Transaction error: ${err.message}`)
-  }
-}
-
-function handleRequestError(err: any, logger: IntegrationLogger) {
-  switch (err.code) {
-      case 'EREQUEST':
-          logger.forBot().error('Message from SQL Server.')
-          break
-      case 'ECANCEL':
-          logger.forBot().error('Request cancelled.')
-          break
-      case 'ETIMEOUT':
-          logger.forBot().error('Request timeout.')
-          break
-      case 'EARGS':
-          logger.forBot().error('Invalid number of arguments.')
-          break
-      case 'EINJECT':
-          logger.forBot().error('SQL injection warning.')
-          break
-      case 'ENOCONN':
-          logger.forBot().error('No connection is specified for that request.')
-          break
-      default:
-          logger.forBot().error(`Request error: ${err.message}`)
-  }
-
-  if (err.code === 'EREQUEST') {
-      logger.forBot().error(`Error number: ${err.number}, state: ${err.state}, class: ${err.class}, line number: ${err.lineNumber}, server: ${err.serverName}, procedure: ${err.procName}`)
-  }
-}
-
-function handlePreparedStatementError(err: any, logger: IntegrationLogger) {
-  switch (err.code) {
-      case 'EARGS':
-          logger.forBot().error('Invalid number of arguments for prepared statement.')
-          break
-      case 'EINJECT':
-          logger.forBot().error('SQL injection warning for prepared statement.')
-          break
-      case 'EALREADYPREPARED':
-          logger.forBot().error('Statement is already prepared.')
-          break
-      case 'ENOTPREPARED':
-          logger.forBot().error('Statement is not prepared.')
-          break
-      default:
-          logger.forBot().error(`Prepared statement error: ${err.message}`)
-  }
-}
+  

@@ -15,6 +15,7 @@ export default new IntegrationDefinition({
       password: z.string().optional().describe('The password for the user.'),
       instanceName: z.string().describe('The server to connect to. Can be an IP address or a domain name.'),
       database: z.string().describe('Name of the database to connect to.'),
+      port: z.number().describe('The port to connect to the database.'),
     }),
   },
   actions: {
