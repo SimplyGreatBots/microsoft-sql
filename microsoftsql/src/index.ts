@@ -8,8 +8,44 @@ type IntegrationCtx = bp.Client['client']['ctx']
 type QueryDataOutput = bp.actions.queryData.output.Output
 type UpdateDataOutput = bp.actions.updateData.output.Output
 type DeleteDataOutput = bp.actions.deleteData.output.Output
+type CustomQueryOutput = bp.actions.customQuery.output.Output
 
 let sqlPool: sql.ConnectionPool | null = null;
+
+async function getOrCreatePool(ctx: IntegrationCtx, logger: IntegrationLogger) {
+    if (!sqlPool) {
+      const user = ctx.configuration.user
+      const password = ctx.configuration.password
+      const instanceName = ctx.configuration.instanceName
+      const database = ctx.configuration.database
+      const port = ctx.configuration.port
+
+      const config = {
+        user: user,
+        password: password,
+        server: instanceName,
+        database: database,
+        pool: {
+          idleTimeoutMillis: 30000
+        },
+        options: {  
+          port: port,
+          encrypt: false,
+          trustServerCertificate: true,
+        }
+      }
+
+      try {
+        sqlPool = new sql.ConnectionPool(config)
+        await sqlPool.connect()
+        logger.forBot().info('Successfully connected and created a new SQL Server connection pool.')
+      } catch (err) {
+        logger.forBot().error(`Failed to create a new SQL connection pool: ${err}`)
+        throw new sdk.RuntimeError(`Failed to create a new SQL connection pool, ${err}`)
+      }
+    }
+    return sqlPool;
+}
 
 export default new bp.Integration({
   register: async ({ ctx, logger }) => {
@@ -178,51 +214,45 @@ export default new bp.Integration({
     
           // Prepare the data to be returned
           return {
-            data: result.recordset 
+			result: {
+				output: result?.output,
+				rowsAffected: result?.rowsAffected,
+				recordset: result?.recordset,
+        		recordsets: result?.recordsets as any[]
+			}
           }
         } catch (error: any) {
           args.logger.forBot().error(`Error executing query: ${error}`)
           throw new sdk.RuntimeError(`Error executing query: ${error}`)
         }
-    }
-	,
+    },
+	customQuery: async (args): Promise<CustomQueryOutput> => {
+		const { query } = args.input;
+	
+		args.logger.forBot().info(`Executing custom SQL query: ${query}`);
+	
+		try {
+			const pool = await getOrCreatePool(args.ctx, args.logger);
+			const result = await pool.request().query(query);
+	
+			args.logger.forBot().info('Custom query executed successfully.');
+	
+			return {
+				result: {
+					output: result?.output,
+					rowsAffected: result?.rowsAffected,
+					recordset: result?.recordset,
+					recordsets: result?.recordsets as any[]
+				}
+			}
+		} catch (error: any) {
+			args.logger.forBot().error(`Failed to execute custom query: ${error}`);
+			throw new sdk.RuntimeError(`Failed to execute custom query: ${error}`);
+		}
+	}
+	
   },
   channels: {},
   handler: async () => {},
 })
-
-async function getOrCreatePool(ctx: IntegrationCtx, logger: IntegrationLogger) {
-    if (!sqlPool) {
-      const user = ctx.configuration.user
-      const password = ctx.configuration.password
-      const instanceName = ctx.configuration.instanceName
-      const database = ctx.configuration.database
-      const port = ctx.configuration.port
-
-      const config = {
-        user: user,
-        password: password,
-        server: instanceName,
-        database: database,
-        pool: {
-          idleTimeoutMillis: 30000
-        },
-        options: {  
-          port: port,
-          encrypt: false,
-          trustServerCertificate: true,
-        }
-      }
-
-      try {
-        sqlPool = new sql.ConnectionPool(config)
-        await sqlPool.connect()
-        logger.forBot().info('Successfully connected and created a new SQL Server connection pool.')
-      } catch (err) {
-        logger.forBot().error(`Failed to create a new SQL connection pool: ${err}`)
-        throw new sdk.RuntimeError(`Failed to create a new SQL connection pool, ${err}`)
-      }
-    }
-    return sqlPool;
-  }
   

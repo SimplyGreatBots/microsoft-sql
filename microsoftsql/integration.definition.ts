@@ -1,6 +1,12 @@
 import { IntegrationDefinition, z } from '@botpress/sdk'
 import { integrationName } from './package.json'
-import { query, rows } from 'mssql'
+
+export const sqlResult = z.object({
+  recordset: z.array(z.any()).optional().describe('First recordset returned by the query, commonly used if only one result set is expected.'),
+  recordsets: z.array(z.any()).optional().describe('All recordsets returned by the query, applicable if multiple result sets are expected.'),
+  rowsAffected: z.array(z.number()).describe('Array detailing the number of rows affected by each operation.'),
+  output: z.record(z.any()).optional().describe('Object containing output values from the query, typically used with stored procedures.')
+})
 
 export default new IntegrationDefinition({
   name: integrationName,
@@ -99,9 +105,23 @@ export default new IntegrationDefinition({
       },
       output: {
         schema: z.object({
-          data: z.array(z.any()).describe('Array of objects representing the data returned by the query.'),
+          result: sqlResult.describe('Detailed result object containing data about the operation including rows affected and any records returned.')
         })
       },
+    },
+    customQuery: {
+      title: 'Custom Query',
+      description: 'Execute a custom SQL query on the PostgreSQL database.',
+      input: {
+        schema: z.object({
+          query: z.string().describe('Complete SQL query to execute.'),
+        }),
+      },
+      output: {
+        schema: z.object({
+          result: sqlResult.describe('Detailed result object containing data about the operation including rows affected and any records returned.')
+        })
+      }
     }
   }
 })
