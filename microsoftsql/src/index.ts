@@ -5,7 +5,9 @@ import * as sql from 'mssql'
 type IntegrationLogger = bp.Client['client']['logger']
 type IntegrationCtx = bp.Client['client']['ctx']
 
-type queryDataOutput = bp.actions.queryData.output.Output
+type QueryDataOutput = bp.actions.queryData.output.Output
+type UpdateDataOutput = bp.actions.updateData.output.Output
+type DeleteDataOutput = bp.actions.deleteData.output.Output
 
 let sqlPool: sql.ConnectionPool | null = null;
 
@@ -114,7 +116,59 @@ export default new bp.Integration({
 
         return {}
     },
-    queryData: async (args): Promise<queryDataOutput> => {
+	updateData: async (args): Promise<UpdateDataOutput> => {
+		const { tableName, data, conditions } = args.input
+	
+    	// Parse the stringified data to get an object
+    	let updates
+		try {
+			updates = JSON.parse(data)
+		} catch (error) {
+			args.logger.forBot().error(`Invalid JSON format for update data. Must be stringable JSON object.`)
+			throw new sdk.RuntimeError('Invalid JSON format for update data. Must be stringable JSON object.')
+		}
+
+		// Generate SQL 'SET' part of the query dynamically from the 'updates' object
+		const setClauses = Object.keys(updates).map(key => {
+			return `${key} = @${key}`
+		}).join(', ')
+	
+		// Construct the full SQL update statement
+		const updateSql = `UPDATE ${tableName} SET ${setClauses} WHERE ${conditions};`
+
+		try {
+			const pool = await getOrCreatePool(args.ctx, args.logger);
+			const request = pool.request();
+	
+			// Add parameters to the request to prevent SQL injection
+			Object.keys(updates).forEach(key => {
+				request.input(key, updates[key]) 
+			})
+	
+			const result = await request.query(updateSql)
+			args.logger.forBot().info(`Update SQL executed successfuly.`)
+	
+			return { result: result }
+		} catch (error: any) {
+			args.logger.forBot().error(`Failed to execute update: ${error}`)
+			throw new sdk.RuntimeError(`Failed to execute update: ${error}`)
+		}
+	},
+	deleteData: async (args): Promise<DeleteDataOutput> => {
+		const { tableName, conditions } = args.input;
+		const deleteSql = `DELETE FROM ${tableName} WHERE ${conditions};`
+	
+		try {
+			const pool = await getOrCreatePool(args.ctx, args.logger)
+			const result = await pool.request().query(deleteSql)
+			args.logger.forBot().info(`Delete operation executed successfully, affected ${result.rowsAffected} rows.`)
+			return { result: result}
+		} catch (error: any) {
+			args.logger.forBot().error(`Error executing delete: ${error}`)
+			throw new sdk.RuntimeError(`Failed to execute delete: ${error}`)
+		}
+	},
+    queryData: async (args): Promise<QueryDataOutput> => {
         const query  = args.input.query
         // Get or create a pool connection
         try {
@@ -130,7 +184,8 @@ export default new bp.Integration({
           args.logger.forBot().error(`Error executing query: ${error}`)
           throw new sdk.RuntimeError(`Error executing query: ${error}`)
         }
-    },
+    }
+	,
   },
   channels: {},
   handler: async () => {},

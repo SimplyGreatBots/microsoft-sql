@@ -1,6 +1,6 @@
 import { IntegrationDefinition, z } from '@botpress/sdk'
 import { integrationName } from './package.json'
-import { query } from 'mssql'
+import { query, rows } from 'mssql'
 
 export default new IntegrationDefinition({
   name: integrationName,
@@ -22,6 +22,7 @@ export default new IntegrationDefinition({
   actions: {
     createTable: {
       title: 'Create Table',
+      description: 'Create a table in the database.',
       input: {
         schema: z.object({
           tableName: z.string().describe('Name of the table to create.'),
@@ -32,10 +33,10 @@ export default new IntegrationDefinition({
         schema: z.object({
         })
       },
-      description: 'Create a table in the database.',
     },
     dropTable: {
       title: 'Drop Table',
+      description: 'Drop a table from the database.',
       input: {
         schema: z.object({
           tableName: z.string().describe('Name of the table to drop.'),
@@ -44,10 +45,10 @@ export default new IntegrationDefinition({
       output:{
         schema: z.object({})
       },
-      description: 'Drop a table from the database.'
     },
      insertData: {
       title: 'Insert Data',
+      description: 'Insert data in to the database.',
       input: {
         schema: z.object({
           tableName: z.string().describe('Name of the table to insert data into.'),
@@ -57,6 +58,37 @@ export default new IntegrationDefinition({
       output: {
         schema: z.object({})
       },  
+    },
+    updateData: {
+      title: 'Update Data',
+      description: 'Update data in the database.',
+      input: {
+        schema: z.object({
+          tableName: z.string().describe('Name of the table to update data in.'),
+          data: z.string().describe('Stringified JSON object representing the data to update.'),
+          conditions: z.string().describe('Conditions for which rows to update, specified in SQL WHERE clause format.')
+        })
+      },
+      output: {
+        schema: z.object({
+          result: z.any().describe('Detailed result object containing data about the operation including rows affected and any records returned.')
+        })
+      }
+    },
+    deleteData: {
+      title: 'Delete Data',
+      description: 'Delete data in the database.',
+      input: {
+        schema: z.object({
+          tableName: z.string().describe('Name of the table to delete data from.'),
+          conditions: z.string().describe('Conditions for which rows to delete, specified in SQL WHERE clause format.')
+        })
+      },
+      output: {
+        schema: z.object({
+          result: z.any().describe('Detailed result object containing data about the operation including rows affected and any records returned.')
+        })
+      }
     },
     queryData: {
       title: 'Query Data',
