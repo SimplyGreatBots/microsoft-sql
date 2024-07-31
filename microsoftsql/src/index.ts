@@ -1,16 +1,12 @@
 import * as sdk from '@botpress/sdk'
 import * as bp from '.botpress'
 import * as sql from 'mssql'
+import { ResultType } from 'integration.definition'
 
 type IntegrationLogger = bp.Client['client']['logger']
 type IntegrationCtx = bp.Client['client']['ctx']
 
-type QueryDataOutput = bp.actions.queryData.output.Output
-type UpdateDataOutput = bp.actions.updateData.output.Output
-type DeleteDataOutput = bp.actions.deleteData.output.Output
-type CustomQueryOutput = bp.actions.customQuery.output.Output
-
-let sqlPool: sql.ConnectionPool | null = null;
+let sqlPool: sql.ConnectionPool | null = null
 
 async function getOrCreatePool(ctx: IntegrationCtx, logger: IntegrationLogger) {
     if (!sqlPool) {
@@ -63,36 +59,34 @@ export default new bp.Integration({
   actions: {
     createTable: async (args): Promise<{}> => {
         // Extract tableName and schema from args.input
-        const { tableName, data } = args.input;
+        const { tableName, data } = args.input
 
-        let tableData;
+        let tableData
         try {
-            tableData = JSON.parse(data);
+            tableData = JSON.parse(data)
         } catch (error) {
             args.logger.forBot().error(`Error parsing JSON schema: ${error}`);
-            throw new sdk.RuntimeError('Error. Schema is not formatted correctly. Must be a stringified JSON');
+            throw new sdk.RuntimeError('Error. Schema is not formatted correctly. Must be a stringified JSON')
         }
 
         // Construct the SQL statement to create a table
-        let createTableSQL = `CREATE TABLE ${tableName} (`;
+        let createTableSQL = `CREATE TABLE ${tableName} (`
         const columnDefinitions = tableData.columns.map((column: any) => {
-            return `${column.name} ${column.type}${column.size ? `(${column.size})` : ''} ${column.required ? 'NOT NULL' : 'NULL'}`;
-        });
-        createTableSQL += columnDefinitions.join(', ') + ');';
-
-        args.logger.forBot().info(`Constructed SQL: ${createTableSQL}`);
+            return `${column.name} ${column.type}${column.size ? `(${column.size})` : ''} ${column.required ? 'NOT NULL' : 'NULL'}`
+        })
+        createTableSQL += columnDefinitions.join(', ') + ');'
 
         // Connect to the database and execute the SQL statement
         try {
-            const pool = await getOrCreatePool(args.ctx, args.logger);
-            const dbResponse = await pool.request().query(createTableSQL);
-            args.logger.forBot().info(`Table ${tableName} created successfully.`);
+            const pool = await getOrCreatePool(args.ctx, args.logger)
+            const dbResponse = await pool.request().query(createTableSQL)
+            args.logger.forBot().info(`Table ${tableName} created successfully.`)
         } catch (error: any) {
-            args.logger.forBot().error(`Error creating table: ${error}`);
-            throw new sdk.RuntimeError(`Failed to create table ${tableName}: ${error.message}`);
+            args.logger.forBot().error(`Failed to create table ${tableName}: ${error}`)
+            throw new sdk.RuntimeError(`Failed to create table ${tableName}: ${error}`)
         }
 
-        return {};
+        return {}
     },
     dropTable: async (args): Promise<{}> => {
         args.logger.forBot().info(`Received request to drop table: ${args.input.tableName}`)
@@ -109,7 +103,7 @@ export default new bp.Integration({
         }
         return {}
     },
-    insertData: async (args): Promise<{}> => {
+    insertData: async (args): Promise<ResultType> => {
         // Parse the input JSON to get table data
         let rowData;
         try {
@@ -143,29 +137,37 @@ export default new bp.Integration({
 
         try {
             const pool = await getOrCreatePool(args.ctx, args.logger)
-            await pool.request().query(insertDataSQL)
+            const result = await pool.request().query(insertDataSQL)
             args.logger.forBot().info(`Data inserted into ${tableName} successfully.`)
+
+          return { 
+            result: {
+              output: result?.output,
+              rowsAffected: result?.rowsAffected,
+              recordset: result?.recordset,
+              recordsets: result?.recordsets as any[]
+            }
+          }
         } catch (error: any) {
             args.logger.forBot().error(`Error inserting data into ${tableName}: ${error}`)
             throw new sdk.RuntimeError(`Failed to insert data into ${tableName}: ${error.message}`)
         }
 
-        return {}
     },
-	updateData: async (args): Promise<UpdateDataOutput> => {
+	  updateData: async (args): Promise<ResultType> => {
 		const { tableName, data, conditions } = args.input
 	
-    	// Parse the stringified data to get an object
-    	let updates
+    // Parse the stringified data to get an object
+    let updatedData
 		try {
-			updates = JSON.parse(data)
+			updatedData = JSON.parse(data)
 		} catch (error) {
 			args.logger.forBot().error(`Invalid JSON format for update data. Must be stringable JSON object.`)
 			throw new sdk.RuntimeError('Invalid JSON format for update data. Must be stringable JSON object.')
 		}
 
 		// Generate SQL 'SET' part of the query dynamically from the 'updates' object
-		const setClauses = Object.keys(updates).map(key => {
+		const setClauses = Object.keys(updatedData).map(key => {
 			return `${key} = @${key}`
 		}).join(', ')
 	
@@ -177,20 +179,27 @@ export default new bp.Integration({
 			const request = pool.request();
 	
 			// Add parameters to the request to prevent SQL injection
-			Object.keys(updates).forEach(key => {
-				request.input(key, updates[key]) 
+			Object.keys(updatedData).forEach(key => {
+				request.input(key, updatedData[key]) 
 			})
 	
 			const result = await request.query(updateSql)
 			args.logger.forBot().info(`Update SQL executed successfuly.`)
 	
-			return { result: result }
+			return { 
+        result: {
+        output: result?.output,
+        rowsAffected: result?.rowsAffected,
+        recordset: result?.recordset,
+        recordsets: result?.recordsets as any[]
+        }
+      }
 		} catch (error: any) {
 			args.logger.forBot().error(`Failed to execute update: ${error}`)
 			throw new sdk.RuntimeError(`Failed to execute update: ${error}`)
 		}
-	},
-	deleteData: async (args): Promise<DeleteDataOutput> => {
+	  },
+	  deleteData: async (args): Promise<ResultType> => {
 		const { tableName, conditions } = args.input;
 		const deleteSql = `DELETE FROM ${tableName} WHERE ${conditions};`
 	
@@ -198,13 +207,20 @@ export default new bp.Integration({
 			const pool = await getOrCreatePool(args.ctx, args.logger)
 			const result = await pool.request().query(deleteSql)
 			args.logger.forBot().info(`Delete operation executed successfully, affected ${result.rowsAffected} rows.`)
-			return { result: result}
+			return { 
+        result: {
+        output: result?.output,
+        rowsAffected: result?.rowsAffected,
+        recordset: result?.recordset,
+        recordsets: result?.recordsets as any[]
+        }
+      }
 		} catch (error: any) {
 			args.logger.forBot().error(`Error executing delete: ${error}`)
 			throw new sdk.RuntimeError(`Failed to execute delete: ${error}`)
 		}
-	},
-    queryData: async (args): Promise<QueryDataOutput> => {
+	  },
+    queryData: async (args): Promise<ResultType> => {
         const query  = args.input.query
         // Get or create a pool connection
         try {
@@ -213,45 +229,20 @@ export default new bp.Integration({
           args.logger.forBot().info(`Query executed successfully.`)
     
           // Prepare the data to be returned
-          return {
-			result: {
-				output: result?.output,
-				rowsAffected: result?.rowsAffected,
-				recordset: result?.recordset,
+          return { 
+            result: {
+				    output: result?.output,
+				    rowsAffected: result?.rowsAffected,
+				    recordset: result?.recordset,
         		recordsets: result?.recordsets as any[]
-			}
+			      }
           }
         } catch (error: any) {
           args.logger.forBot().error(`Error executing query: ${error}`)
           throw new sdk.RuntimeError(`Error executing query: ${error}`)
         }
+      }
     },
-	customQuery: async (args): Promise<CustomQueryOutput> => {
-		const { query } = args.input;
-	
-		args.logger.forBot().info(`Executing custom SQL query: ${query}`);
-	
-		try {
-			const pool = await getOrCreatePool(args.ctx, args.logger);
-			const result = await pool.request().query(query);
-	
-			args.logger.forBot().info('Custom query executed successfully.');
-	
-			return {
-				result: {
-					output: result?.output,
-					rowsAffected: result?.rowsAffected,
-					recordset: result?.recordset,
-					recordsets: result?.recordsets as any[]
-				}
-			}
-		} catch (error: any) {
-			args.logger.forBot().error(`Failed to execute custom query: ${error}`);
-			throw new sdk.RuntimeError(`Failed to execute custom query: ${error}`);
-		}
-	}
-	
-  },
   channels: {},
   handler: async () => {},
 })
