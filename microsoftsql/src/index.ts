@@ -22,7 +22,7 @@ async function getOrCreatePool(ctx: IntegrationCtx, logger: IntegrationLogger) {
         server: instanceName,
         database: database,
         pool: {
-          idleTimeoutMillis: 30000
+          idleTimeoutMillis: 120000
         },
         options: {  
           port: port,

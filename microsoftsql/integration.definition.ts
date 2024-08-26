@@ -23,7 +23,7 @@ export default new IntegrationDefinition({
   name: integrationName,
   title: 'Microsoft SQL',
   description: 'Microsoft SQL integration to manage database operations directly within your bot.',
-  version: '1.0.0',
+  version: '1.0.1',
   readme: 'hub.md',
   icon: 'icon.svg',
   channels: {},
